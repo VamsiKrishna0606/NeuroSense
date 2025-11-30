@@ -5,6 +5,7 @@ from torch.utils.data import Dataset, DataLoader
 
 from model.brain2vec import Brain2Vec
 
+
 class SubjectDataset(Dataset):
     def __init__(self, data_dict, label_dict, subjects):
         self.samples = []
@@ -20,6 +21,7 @@ class SubjectDataset(Dataset):
     def __getitem__(self, idx):
         return self.samples[idx], torch.tensor(self.labels[idx]).float()
 
+
 def train_one_subject(train_subjects, test_subject, data, labels, device):
 
     train_dataset = SubjectDataset(data, labels, train_subjects)
@@ -31,12 +33,13 @@ def train_one_subject(train_subjects, test_subject, data, labels, device):
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
     EPOCHS = 20
-    model.train()
 
-    print(f"\n🚀 Training LOSO — Test on {test_subject}, Train on {len(train_subjects)} subjects")
+    print(f"\n🚀 Training LOSO — Test on {test_subject} | Train on {len(train_subjects)} subjects")
 
     for epoch in range(EPOCHS):
         total_loss = 0
+        model.train()
+
         for X, y in train_loader:
             X, y = X.to(device), y.to(device).unsqueeze(1)
 

@@ -1,60 +1,66 @@
 import os
-import numpy as np
 import scipy.io as sio
 import torch
+import numpy as np
 
-class DEAPSubjectLoader:
+
+def load_all_subjects(data_folder):
     """
-    Loads DEAP dataset subject-wise for LOSO.
-    Output format:
-        self.data["s01"] = [tensor, tensor, ...]  # 40 trials
-        self.labels["s01"] = [0/1, 0/1, ...]      # 40 labels
+    Loads all DEAP subjects into:
+    data["s01"] = [tensor1, tensor2, ...]
+    labels["s01"] = [0,1,0,1,...]
     """
 
-    def __init__(self, data_folder):
-        self.data = {}
-        self.labels = {}
-        print(f"📥 Loading DEAP subjects from: {data_folder}")
+    data = {}
+    labels = {}
 
-        for fname in sorted(os.listdir(data_folder)):
-            if not fname.endswith(".mat"):
-                continue
+    print(f"📥 Loading DEAP subjects from: {data_folder}")
 
-            subject = fname.split(".")[0]   # "s01"
-            path = os.path.join(data_folder, fname)
+    files = sorted(os.listdir(data_folder))
 
-            mat = sio.loadmat(path, simplify_cells=True)
-            raw_data = mat["data"]        # shape (40,40,8064)
-            raw_labels = mat["labels"]    # shape (40,4)
+    for file in files:
+        if not file.endswith(".mat"):
+            continue
 
-            # Extract arousal labels and binarize
-            arousal = raw_labels[:, 1]
-            bin_labels = (arousal >= 5).astype(int)
+        subject_id = file.replace(".mat", "")  # "s01"
+        path = os.path.join(data_folder, file)
 
-            subject_samples = []
-            subject_labels = []
+        mat = sio.loadmat(path, simplify_cells=True)
+        eeg = mat["data"]        # shape: (40 trials, 40 channels, 8064 samples)
+        lbl = mat["labels"]      # shape: (40 trials, 4 labels)
 
-            for i in range(40):
-                trial = raw_data[i][:32]   # (32, 8064)
+        subject_samples = []
+        subject_labels = []
 
-                # Normalize each channel
-                for c in range(32):
-                    ch = trial[c]
-                    trial[c] = (ch - ch.mean()) / (ch.std() + 1e-6)
+        arousal = lbl[:, 1]
+        bin_labels = (arousal >= 5).astype(int)
 
-                # Reshape (32 × 8064) -> (1 × 32 × 252)
-                reshaped = []
-                for c in range(32):
-                    ch = trial[c].reshape(252, 32)
-                    reshaped.append(ch)
+        for i in range(40):
 
-                reshaped = np.stack(reshaped)[:, :, 0]  # (32, 252)
-                tensor = torch.tensor(reshaped, dtype=torch.float32).unsqueeze(0)
+            trial = eeg[i][:32]  # take first 32 channels
 
-                subject_samples.append(tensor)
-                subject_labels.append(int(bin_labels[i]))
+            for c in range(32):
+                ch = trial[c]
+                ch = (ch - ch.mean()) / (ch.std() + 1e-6)
+                trial[c] = ch
 
-            self.data[subject] = subject_samples
-            self.labels[subject] = subject_labels
+            # reshape: 8064 → (252, 32)
+            reshaped = []
+            for c in range(32):
+                ch = trial[c].reshape(252, 32)
+                reshaped.append(ch)
 
-        print(f"✅ Loaded {len(self.data)} subjects.")
+            reshaped = np.stack(reshaped)  # (32, 252, 32)
+            reshaped = reshaped[:, :, 0]    # (32, 252)
+
+            tensor = torch.tensor(reshaped, dtype=torch.float32).unsqueeze(0)
+            subject_samples.append(tensor)
+            subject_labels.append(int(bin_labels[i]))
+
+        data[subject_id] = subject_samples
+        labels[subject_id] = subject_labels
+
+        print(f"  Loaded: {subject_id} → {len(subject_samples)} samples")
+
+    print("✅ Finished loading all subjects.")
+    return data, labels

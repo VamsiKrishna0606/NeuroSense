@@ -1,70 +1,68 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-
-
-class AttentionBlock(nn.Module):
-    def __init__(self, hidden_dim):
-        super().__init__()
-        self.att = nn.Linear(hidden_dim, 1)
-
-    def forward(self, x):
-        w = self.att(x)               # (B, T, 1)
-        w = F.softmax(w, dim=1)
-        ctx = torch.sum(w * x, dim=1)
-        return ctx
 
 
 class Brain2Vec(nn.Module):
-    def __init__(self, num_classes=1):  # BCE → 1 output
-        super().__init__()
+    def __init__(self):
+        super(Brain2Vec, self).__init__()
 
-        # Input shape: (1, 32, 252)
+        # --------------------------
+        # 1. CNN Feature Extractor
+        # --------------------------
         self.cnn = nn.Sequential(
-            nn.Conv2d(1, 16, 3, padding=1),
-            nn.BatchNorm2d(16),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-
-            nn.Conv2d(16, 32, 3, padding=1),
+            nn.Conv2d(1, 32, kernel_size=(3, 3), padding=1),
             nn.BatchNorm2d(32),
             nn.ReLU(),
-            nn.MaxPool2d(2),
 
-            nn.Conv2d(32, 64, 3, padding=1),
+            nn.Conv2d(32, 64, kernel_size=(3, 3), padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(),
-            nn.MaxPool2d(2),
+
+            nn.MaxPool2d(kernel_size=(2, 2))  # (32,252) → (16,126)
         )
 
-        # CNN output = (64, 4, 31)
-        self.feature_dim = 64 * 4    # 256
-        self.seq_len = 31
+        # --------------------------
+        # 2. Prepare for Attention
+        # --------------------------
+        self.embedding_dim = 64 * 16   # = 1024
+        self.seq_len = 126
 
-        self.lstm = nn.LSTM(
-            input_size=self.feature_dim,
-            hidden_size=128,
+        self.linear_proj = nn.Linear(1024, 128)
+
+        # --------------------------
+        # 3. Multi-Head Self Attention
+        # --------------------------
+        self.mha = nn.MultiheadAttention(
+            embed_dim=128,
+            num_heads=4,
+            dropout=0.1,
             batch_first=True
         )
 
-        self.att = AttentionBlock(128)
-
+        # --------------------------
+        # 4. Classification Head
+        # --------------------------
         self.fc = nn.Sequential(
             nn.Linear(128, 64),
             nn.ReLU(),
-            nn.Linear(64, num_classes)
+            nn.Dropout(0.2),
+            nn.Linear(64, 1)
         )
 
     def forward(self, x):
-        cnn_out = self.cnn(x)             # (B,64,4,31)
-        B, C, H, T = cnn_out.shape
+        # x: (B, 1, 32, 252)
 
-        lstm_in = cnn_out.permute(0, 3, 1, 2).reshape(
-            B, T, C * H
-        )  # (B,31,256)
+        x = self.cnn(x)  # (B,64,16,126)
 
-        lstm_out, _ = self.lstm(lstm_in)
-        ctx = self.att(lstm_out)
-        out = self.fc(ctx)
+        B, C, H, T = x.shape
 
-        return out  # (B,1)
+        x = x.permute(0, 3, 1, 2)    # (B,T,C,H)
+        x = x.reshape(B, T, C * H)   # (B,T,1024)
+
+        x = self.linear_proj(x)       # (B,T,128)
+
+        attn_out, _ = self.mha(x, x, x)
+
+        pooled = attn_out.mean(dim=1)
+
+        return self.fc(pooled)

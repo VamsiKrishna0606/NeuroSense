@@ -1,26 +1,13 @@
-import os
-import numpy as np
-import csv
-from sklearn.metrics import confusion_matrix
-import matplotlib.pyplot as plt
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 
-def save_subject_results(subject, labels, preds, probs):
 
-    os.makedirs(f"results/{subject}", exist_ok=True)
+def compute_metrics(y_true, preds, probs):
+    acc = accuracy_score(y_true, preds)
+    f1 = f1_score(y_true, preds, zero_division=0)
 
-    # Save predictions CSV
-    with open(f"results/{subject}/predictions.csv", "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["true", "pred", "prob"])
-        for t, p, pr in zip(labels, preds, probs):
-            writer.writerow([t, p, pr])
+    try:
+        auc = roc_auc_score(y_true, probs)
+    except:
+        auc = 0.5
 
-    # Confusion matrix
-    cm = confusion_matrix(labels, preds)
-
-    plt.figure(figsize=(3,3))
-    plt.imshow(cm, cmap="Blues")
-    plt.title(f"Confusion Matrix — {subject}")
-    plt.colorbar()
-    plt.savefig(f"results/{subject}/confusion_matrix.png")
-    plt.close()
+    return acc, f1, auc
