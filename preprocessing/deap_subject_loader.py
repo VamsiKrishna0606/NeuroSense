@@ -1,66 +1,102 @@
 import os
 import scipy.io as sio
-import torch
 import numpy as np
+import torch
+from scipy.signal import butter, filtfilt
+from functools import lru_cache
+
+# -----------------------------------------------------------
+# OPTIONAL BANDPASS FILTER (4–45 Hz)
+# -----------------------------------------------------------
+def butter_bandpass(lowcut=4, highcut=45, fs=128, order=4):
+    nyq = 0.5 * fs
+    low = lowcut / nyq
+    high = highcut / nyq
+    return butter(order, [low, high], btype='band')
+
+def apply_bandpass(signal, fs=128):
+    b, a = butter_bandpass()
+    return filtfilt(b, a, signal)
 
 
+# -----------------------------------------------------------
+# Convert raw 8064 samples → (63, 128)
+# -----------------------------------------------------------
+def reshape_eeg(channel_signal):
+    """
+    channel_signal: (8064,)
+    output: (63, 128)
+    """
+    return channel_signal.reshape(63, 128)
+
+
+# -----------------------------------------------------------
+# MAIN LOADER
+# -----------------------------------------------------------
 def load_all_subjects(data_folder):
     """
-    Loads all DEAP subjects into:
-    data["s01"] = [tensor1, tensor2, ...]
-    labels["s01"] = [0,1,0,1,...]
+    Returns:
+    data["s01"]   -> list of tensors, shape (1, 32, 63, 128)
+    labels["s01"] -> list of 0/1 labels
     """
 
-    data = {}
-    labels = {}
+    print(f"\n📥 Loading DEAP from: {data_folder}")
 
-    print(f"📥 Loading DEAP subjects from: {data_folder}")
+    subjects_data = {}
+    subjects_labels = {}
 
-    files = sorted(os.listdir(data_folder))
+    files = sorted([f for f in os.listdir(data_folder) if f.endswith(".mat")])
 
     for file in files:
-        if not file.endswith(".mat"):
-            continue
-
-        subject_id = file.replace(".mat", "")  # "s01"
+        subject_id = file.replace(".mat", "")   # "s01"
         path = os.path.join(data_folder, file)
 
         mat = sio.loadmat(path, simplify_cells=True)
-        eeg = mat["data"]        # shape: (40 trials, 40 channels, 8064 samples)
-        lbl = mat["labels"]      # shape: (40 trials, 4 labels)
 
-        subject_samples = []
-        subject_labels = []
+        eeg = mat["data"]      # (40 trials, 40 channels, 8064 samples)
+        labels = mat["labels"] # (40 trials, 4 labels)
 
-        arousal = lbl[:, 1]
-        bin_labels = (arousal >= 5).astype(int)
+        subject_tensors = []
+        subject_targets = []
 
-        for i in range(40):
+        # Arousal label
+        arousal = labels[:, 1]
+        binary_labels = (arousal >= 5).astype(int)
 
-            trial = eeg[i][:32]  # take first 32 channels
+        for trial_idx in range(40):
+
+            # --- take first 32 channels only ---
+            trial = eeg[trial_idx][:32]         # (32, 8064)
+
+            processed_channels = []
 
             for c in range(32):
-                ch = trial[c]
-                ch = (ch - ch.mean()) / (ch.std() + 1e-6)
-                trial[c] = ch
+                signal = trial[c]
 
-            # reshape: 8064 → (252, 32)
-            reshaped = []
-            for c in range(32):
-                ch = trial[c].reshape(252, 32)
-                reshaped.append(ch)
+                # OPTIONAL – enable if needed
+                # signal = apply_bandpass(signal)
 
-            reshaped = np.stack(reshaped)  # (32, 252, 32)
-            reshaped = reshaped[:, :, 0]    # (32, 252)
+                # normalize channel
+                signal = (signal - signal.mean()) / (signal.std() + 1e-6)
 
-            tensor = torch.tensor(reshaped, dtype=torch.float32).unsqueeze(0)
-            subject_samples.append(tensor)
-            subject_labels.append(int(bin_labels[i]))
+                # reshape 8064 → (63, 128)
+                signal_reshaped = reshape_eeg(signal)   # (63, 128)
 
-        data[subject_id] = subject_samples
-        labels[subject_id] = subject_labels
+                processed_channels.append(signal_reshaped)
 
-        print(f"  Loaded: {subject_id} → {len(subject_samples)} samples")
+            # stack channels → shape (32, 63, 128)
+            arr = np.stack(processed_channels)
 
-    print("✅ Finished loading all subjects.")
-    return data, labels
+            # final tensor → (1, 32, 63, 128)
+            tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0)
+
+            subject_tensors.append(tensor)
+            subject_targets.append(int(binary_labels[trial_idx]))
+
+        subjects_data[subject_id] = subject_tensors
+        subjects_labels[subject_id] = subject_targets
+
+        print(f"  Loaded {subject_id}: {len(subject_tensors)} samples")
+
+    print("✅ Finished loading all subjects.\n")
+    return subjects_data, subjects_labels
