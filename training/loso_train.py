@@ -108,8 +108,10 @@ def train_one_subject(train_subjects, test_subject, data, labels, device):
         mode='min',
         patience=2,
         factor=0.5,
-        verbose=False
+        threshold=1e-4
     )
+
+
 
     EPOCHS = 15
     early_stopper = EarlyStopper(patience=3)
