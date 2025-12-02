@@ -31,7 +31,7 @@ class ETLAFSuperModel(nn.Module):
         super().__init__()
 
         # -------------------------------------------------------
-        # RAW BRANCH: Feature extraction for (32,59,128)
+        # RAW BRANCH
         # -------------------------------------------------------
         self.raw_linear = nn.Linear(128, raw_embed_dim)
 
@@ -56,9 +56,9 @@ class ETLAFSuperModel(nn.Module):
         )
 
         # -------------------------------------------------------
-        # MULTIBAND BRANCH: Feature extraction for (32,W,4,128)
+        # MULTIBAND BRANCH
         # -------------------------------------------------------
-        self.band_cnn = BandCNN()   # → 256 dim
+        self.band_cnn = BandCNN()   # output = 256 dim
 
         self.mb_transformer = TemporalTransformer(
             d_model=mb_embed_dim,
@@ -70,7 +70,7 @@ class ETLAFSuperModel(nn.Module):
 
         self.mb_channel_att = ChannelMHA(
             embed_dim=mb_embed_dim,
-            num_heads=6
+            num_heads=4
         )
 
         self.mb_lstm = BiLSTMBlock(
@@ -81,7 +81,7 @@ class ETLAFSuperModel(nn.Module):
         )
 
         # -------------------------------------------------------
-        # FUSION LAYER: Raw(512) + MB(512) → Fusion → 256
+        # FUSION LAYER
         # -------------------------------------------------------
         self.fusion = nn.Sequential(
             nn.Linear(512 + 512, fusion_dim),
@@ -105,9 +105,8 @@ class ETLAFSuperModel(nn.Module):
             nn.ReLU(),
             nn.Dropout(0.3),
 
-            nn.Linear(64, 1)  # final logit
+            nn.Linear(64, 1)
         )
-
 
     # ===========================================================
     # FORWARD PASS
@@ -122,59 +121,47 @@ class ETLAFSuperModel(nn.Module):
         # -------------------------------
         # RAW BRANCH
         # -------------------------------
-        # (B,1,32,59,128) → (B,32,59,128)
-        raw = raw.squeeze(1)
+        raw = raw.squeeze(1)  # (B,32,59,128)
 
-        # Linear project each window: (B,32,59,128) → (B,32,59,256)
-        raw = self.raw_linear(raw)
+        raw = self.raw_linear(raw)  # (B,32,59,256)
 
-        # Temporal transformer requires (B*C,T,256)
-        raw_t = raw.view(B * 32, raw.size(2), raw.size(3))  # (B*32,59,256)
+        raw_t = raw.view(B * 32, raw.size(2), raw.size(3))
         raw_t = self.raw_transformer(raw_t)
-        # back to (B,32,59,256)
         raw_t = raw_t.view(B, 32, raw.size(2), raw.size(3))
 
-        # Spatial attention across channels:
         raw_t2 = self.raw_spatial_att(raw_t.mean(dim=2))  # (B,32,256)
 
-        # LSTM temporal learning
         raw_feat = self.raw_lstm(raw_t2)  # (B,512)
 
         # -------------------------------
         # MULTIBAND BRANCH
         # -------------------------------
-        # (B,1,32,W,4,128) → (B,32,W,4,128)
         mb = mb.squeeze(1)
         B, C, W, _, S = mb.shape
 
-        # CNN on each band window
         mb_flat = mb.view(B * C * W, 4, 128)
         mb_embed = self.band_cnn(mb_flat)   # (B*C*W,256)
 
-        # reshape to temporal sequences: (B,C,W,256)
         mb_embed = mb_embed.view(B, C, W, 256)
 
-        # transformer on temporal axis
-        mb_t = mb_embed.view(B * C, W, 256)      # (B*C,W,256)
+        mb_t = mb_embed.view(B * C, W, 256)
         mb_t = self.mb_transformer(mb_t)
-        mb_t = mb_t.view(B, C, W, 256)           # (B,32,W,256)
+        mb_t = mb_t.view(B, C, W, 256)
 
-        # channel attention
-        mb_att = self.mb_channel_att(mb_t.mean(dim=2))  # (B,32,256)
+        mb_att = self.mb_channel_att(mb_t.mean(dim=2))
 
-        # LSTM temporal learning
         mb_feat = self.mb_lstm(mb_att)  # (B,512)
 
         # -------------------------------
         # FUSION
         # -------------------------------
-        fused = torch.cat([raw_feat, mb_feat], dim=1)  # (B,1024)
+        fused = torch.cat([raw_feat, mb_feat], dim=1)
 
-        fused = self.fusion(fused)  # (B,256)
+        fused = self.fusion(fused)
 
         # -------------------------------
         # CLASSIFIER
         # -------------------------------
-        out = self.classifier(fused)  # (B,1)
+        out = self.classifier(fused)
 
         return out

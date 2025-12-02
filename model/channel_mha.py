@@ -9,7 +9,7 @@ class ChannelMHA(nn.Module):
     Input:  (B, 32, 256)
     Output: (B, 32, 256)
     """
-    def __init__(self, embed_dim=256, num_heads=6):
+    def __init__(self, embed_dim=256, num_heads=4):
         super().__init__()
         self.norm = nn.LayerNorm(embed_dim)
         self.mha = nn.MultiheadAttention(
