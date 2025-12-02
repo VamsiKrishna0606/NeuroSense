@@ -1,3 +1,4 @@
+import numpy as np
 from sklearn.metrics import (
     accuracy_score,
     f1_score,
@@ -5,80 +6,50 @@ from sklearn.metrics import (
     precision_recall_curve,
     auc,
     balanced_accuracy_score,
-    confusion_matrix
+    recall_score
 )
-import numpy as np
 
 
-def compute_all_metrics(y_true, preds, probs):
+def compute_all_metrics(y_true, y_pred, y_prob):
     """
-    y_true: (N,)
-    preds: (N,)
-    probs: (N,)  raw probabilities (sigmoid outputs)
+    Returns a dictionary of ALL important metrics.
     """
 
-    # -----------------------------------------------------------
-    # Standard Metrics
-    # -----------------------------------------------------------
-    acc = accuracy_score(y_true, preds)
-    f1 = f1_score(y_true, preds, zero_division=0)
+    accuracy = accuracy_score(y_true, y_pred)
+    f1 = f1_score(y_true, y_pred, zero_division=0)
+    f1_macro = f1_score(y_true, y_pred, average="macro", zero_division=0)
+    f1_weighted = f1_score(y_true, y_pred, average="weighted", zero_division=0)
 
-    # Macro and weighted F1 for imbalanced cases
-    f1_macro = f1_score(y_true, preds, average='macro', zero_division=0)
-    f1_weighted = f1_score(y_true, preds, average='weighted', zero_division=0)
-
-    # -----------------------------------------------------------
-    # AUC (Safe)
-    # -----------------------------------------------------------
+    # ROC-AUC
     try:
-        auc_roc = roc_auc_score(y_true, probs)
+        roc_auc = roc_auc_score(y_true, y_prob)
     except:
-        auc_roc = 0.5
+        roc_auc = 0.5
 
-    # -----------------------------------------------------------
-    # PR-AUC (important when F1 is weak)
-    # -----------------------------------------------------------
+    # PR-AUC
     try:
-        precision, recall, _ = precision_recall_curve(y_true, probs)
+        precision, recall, _ = precision_recall_curve(y_true, y_prob)
         pr_auc = auc(recall, precision)
     except:
-        pr_auc = 0.0
+        pr_auc = 0.5
 
-    # -----------------------------------------------------------
-    # Balanced Accuracy
-    # -----------------------------------------------------------
-    try:
-        bal_acc = balanced_accuracy_score(y_true, preds)
-    except:
-        bal_acc = acc
+    # Balanced Acc
+    bal_acc = balanced_accuracy_score(y_true, y_pred)
 
-    # -----------------------------------------------------------
-    # Sensitivity & Specificity
-    # -----------------------------------------------------------
-    try:
-        tn, fp, fn, tp = confusion_matrix(y_true, preds).ravel()
+    # Sensitivity (Recall of positive class)
+    sens = recall_score(y_true, y_pred, pos_label=1, zero_division=0)
 
-        sensitivity = tp / (tp + fn + 1e-6)  # recall for positive class
-        specificity = tn / (tn + fp + 1e-6)  # recall for negative class
-    except:
-        sensitivity, specificity = 0.0, 0.0
+    # Specificity (Recall of negative class)
+    spec = recall_score(y_true, y_pred, pos_label=0, zero_division=0)
 
     return {
-        "accuracy": acc,
+        "accuracy": accuracy,
         "f1": f1,
         "f1_macro": f1_macro,
         "f1_weighted": f1_weighted,
-        "auc": auc_roc,
+        "auc": roc_auc,
         "pr_auc": pr_auc,
         "balanced_accuracy": bal_acc,
-        "sensitivity": sensitivity,
-        "specificity": specificity
+        "sensitivity": sens,
+        "specificity": spec
     }
-
-
-# =============================================================
-# Keep backwards compatibility with your old compute_metrics()
-# =============================================================
-def compute_metrics(y_true, preds, probs):
-    m = compute_all_metrics(y_true, preds, probs)
-    return m["accuracy"], m["f1"], m["auc"]
