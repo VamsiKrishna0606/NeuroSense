@@ -25,7 +25,7 @@ if __name__ == "__main__":
     results_file = "results/summary.csv"
 
     # ---------------------------------------------------------
-    # CSV HEADER
+    # CSV HEADER  (REMOVED best_threshold)
     # ---------------------------------------------------------
     with open(results_file, "w", newline="") as f:
         writer = csv.writer(f)
@@ -39,8 +39,7 @@ if __name__ == "__main__":
             "pr_auc",
             "balanced_accuracy",
             "sensitivity",
-            "specificity",
-            "best_threshold"
+            "specificity"
         ])
 
     all_metrics = {k: [] for k in [
@@ -78,7 +77,7 @@ if __name__ == "__main__":
         # Evaluate
         metrics = evaluate_subject(model, test_subject, data, labels, device)
 
-        # Log metrics
+        # Log metrics  (REMOVED best_threshold)
         with open(results_file, "a", newline="") as f:
             writer = csv.writer(f)
             writer.writerow([
@@ -91,19 +90,18 @@ if __name__ == "__main__":
                 metrics["pr_auc"],
                 metrics["balanced_accuracy"],
                 metrics["sensitivity"],
-                metrics["specificity"],
-                metrics["best_threshold"]
+                metrics["specificity"]
             ])
 
         # Append for averaging later
         for k in all_metrics.keys():
             all_metrics[k].append(metrics[k])
 
+        # PRINT (REMOVED best_threshold)
         print(f"✔ ACC={metrics['accuracy']:.3f} | "
               f"F1={metrics['f1']:.3f} | "
               f"AUC={metrics['auc']:.3f} | "
-              f"PR-AUC={metrics['pr_auc']:.3f} | "
-              f"Thr={metrics['best_threshold']:.2f}")
+              f"PR-AUC={metrics['pr_auc']:.3f}")
 
     # ---------------------------------------------------------
     # FINAL AVERAGES

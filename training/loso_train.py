@@ -2,11 +2,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
-
-from model.brain2vec import Brain2Vec
 import numpy as np
 import random
 import time
+from model.brain2vec import Brain2Vec
 
 
 # ============================================================
@@ -18,8 +17,12 @@ class SubjectDataset(Dataset):
         self.labels = []
 
         for s in subjects:
-            self.samples.extend(data_dict[s])      # list of tensors
-            self.labels.extend(label_dict[s])
+            trials = data_dict[s]          # list of (32, W, 128)
+            lbls = label_dict[s]           # list of labels
+
+            for x, y in zip(trials, lbls):
+                self.samples.append(torch.tensor(x, dtype=torch.float32))
+                self.labels.append(float(y))
 
         self.labels = torch.tensor(self.labels).float()
 
@@ -27,9 +30,9 @@ class SubjectDataset(Dataset):
         return len(self.samples)
 
     def __getitem__(self, idx):
-        X = self.samples[idx]
+        X = self.samples[idx]     # (32, W, 128)
         y = self.labels[idx]
-        return X, y.unsqueeze(0)     # keep (1,) shape
+        return X, y.unsqueeze(0)
 
 
 # ============================================================
@@ -57,20 +60,13 @@ class EarlyStopper:
 # ============================================================
 def train_one_subject(train_subjects, test_subject, data, labels, device):
 
-    # ----------------------------------------------------------
-    # Reproducibility
-    # ----------------------------------------------------------
     torch.manual_seed(42)
     np.random.seed(42)
     random.seed(42)
 
-    # ----------------------------------------------------------
-    # Dataset + Balanced Sampler
-    # ----------------------------------------------------------
     train_dataset = SubjectDataset(data, labels, train_subjects)
-
-    # compute weights for balancing positives/negatives
     label_tensor = train_dataset.labels
+
     class_sample_counts = torch.tensor([(label_tensor == 0).sum(),
                                         (label_tensor == 1).sum()],
                                        dtype=torch.float)
@@ -86,47 +82,30 @@ def train_one_subject(train_subjects, test_subject, data, labels, device):
 
     train_loader = DataLoader(
         train_dataset,
-        batch_size=16,
+        batch_size=8,      # smaller batch because shape is larger
         sampler=sampler,
-        num_workers=2,
-        pin_memory=True
+        num_workers=0,     # set to 0 on Windows
+        pin_memory=False
     )
 
-    # ----------------------------------------------------------
-    # Model + Optimizer + Scheduler
-    # ----------------------------------------------------------
     model = Brain2Vec().to(device)
     optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
 
-    # BCE loss but with pos_weight for extra influence on positives (boost F1)
     pos_weight = torch.tensor([3.0], device=device)
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
-    # Scheduler — reduce LR when training gets stuck
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode='min',
-        patience=2,
-        factor=0.5,
-        verbose=False
-    )
-
-    EPOCHS = 15
+    EPOCHS = 12
     early_stopper = EarlyStopper(patience=3)
 
-    print(f"\n🚀 Training LOSO: Test on {test_subject} | Train on {len(train_subjects)} subjects")
+    print(f"\n🚀 Training LOSO: Test on {test_subject}")
 
-    # ----------------------------------------------------------
-    # Training Loop
-    # ----------------------------------------------------------
     for epoch in range(EPOCHS):
-
-        start_time = time.time()
         model.train()
-        total_loss = 0.0
+        total_loss = 0
+        start = time.time()
 
         for X, y in train_loader:
-            X = X.to(device)
+            X = X.to(device)    # (B, 32, W, 128)
             y = y.to(device)
 
             optimizer.zero_grad()
@@ -135,21 +114,16 @@ def train_one_subject(train_subjects, test_subject, data, labels, device):
             loss = criterion(out, y)
 
             loss.backward()
-
-            # gradient clipping prevents exploding gradients (common in LOSO)
             nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-
             optimizer.step()
+
             total_loss += loss.item()
 
         avg_loss = total_loss / len(train_loader)
-        scheduler.step(avg_loss)
+        print(f"Epoch {epoch+1}/{EPOCHS} | Loss: {avg_loss:.4f} | Time: {time.time()-start:.1f}s")
 
-        print(f"Epoch {epoch+1}/{EPOCHS} | Loss: {avg_loss:.4f} | LR: {optimizer.param_groups[0]['lr']:.6f} | Time: {time.time()-start_time:.1f}s")
-
-        # early stopping
         if early_stopper.should_stop(avg_loss):
-            print("🛑 Early stopping triggered.")
+            print("🛑 Early stopping.")
             break
 
     return model
