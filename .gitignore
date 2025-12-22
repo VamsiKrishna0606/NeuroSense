@@ -1,4 +1,6 @@
-# Ignore datasets
+# ===============================
+# Datasets / Data files
+# ===============================
 data/
 *.mat
 *.npy
@@ -8,15 +10,40 @@ data/
 *.7z
 *.rar
 
-# Ignore model checkpoints
+# ===============================
+# Model checkpoints / weights
+# ===============================
 checkpoints/
 *.pt
 *.pth
+backend/**/*.pth
 
-# Python cache
+# ===============================
+# ML outputs
+# ===============================
+ml/results/
+
+# ===============================
+# Python
+# ===============================
 __pycache__/
 *.pyc
+venv/
 
-# System files
+# ===============================
+# Frontend
+# ===============================
+frontend/node_modules/
+
+# ===============================
+# Backend runtime files
+# ===============================
+backend/uploads/
+backend/reports/
+
+# ===============================
+# Environment / System
+# ===============================
+.env
 .DS_Store
 Thumbs.db
